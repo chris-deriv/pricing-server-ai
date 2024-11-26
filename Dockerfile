@@ -1,33 +1,30 @@
-# syntax=docker/dockerfile:1
-
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.20-alpine AS builder
 
-# Set the working directory inside the container
 WORKDIR /app
 
-# Copy go.mod and go.sum first for better caching
+# Copy go mod and sum files
 COPY go.mod go.sum ./
+
+# Download dependencies
 RUN go mod download
 
-# Now copy the source code
-COPY ./cmd/pricingserver/main.go ./
-COPY internal/ ./internal/
+# Copy the source code
+COPY . .
 
-# Build the application with the correct output path
-RUN mkdir -p /app/cmd/pricingserver && go build -o /app/cmd/pricingserver/main .
+# Build the application
+RUN CGO_ENABLED=0 GOOS=linux go build -o /pricingserver ./cmd/pricingserver
 
 # Final stage
 FROM alpine:latest
 
-# Set the working directory inside the container
-WORKDIR /app
+WORKDIR /
 
-# Copy the compiled binary from the builder stage
-COPY --from=builder /app/cmd/pricingserver/main ./main
+# Copy the binary from builder
+COPY --from=builder /pricingserver /pricingserver
 
-# Set the environment variable
-ENV DEBUG=true
+# Expose the port
+EXPOSE 8080
 
-# Specify the full path to the executable
-CMD ["/app/main"]
+# Run the binary
+CMD ["/pricingserver"]

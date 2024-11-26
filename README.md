@@ -24,13 +24,13 @@ docker run -p 8080:8080 -e DEBUG=true pricing-server
 
 ```bash
 # Start the service
-docker-compose up
+docker compose up
 
 # Start in detached mode
-docker-compose up -d
+docker compose up -d
 
 # Stop the service
-docker-compose down
+docker compose down
 ```
 
 ## Environment Variables
