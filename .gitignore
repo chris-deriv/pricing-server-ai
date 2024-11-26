@@ -1,0 +1,63 @@
+# Go specific
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+
+# Go binary
+bin/
+dist/
+
+# Go workspace file
+go.work
+
+# Node.js specific
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE specific
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+*.sublime-workspace
+*.sublime-project
+
+# Logs
+logs
+*.log
+
+# Build output
+build/
+dist/
+out/
+
+# Dependency directories
+vendor/
+
+# Test coverage
+coverage/
+*.cover
+*.coverprofile
+
+# Binary files
+*.bin
+
+# Debug files
+debug/
+
+# Temporary files
+tmp/
+temp/ 
