@@ -2,13 +2,20 @@
   "name": "test",
   "version": "1.0.0",
   "description": "",
-  "main": "ws.js",
+  "main": "ws.test.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest --detectOpenHandles"
   },
+  "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "ws": "^8.18.0"
+    "ws": "^8.13.0"
+  },
+  "devDependencies": {
+    "jest": "^29.6.0"
+  },
+  "jest": {
+    "testTimeout": 10000
   }
 }
