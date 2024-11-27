@@ -40,16 +40,25 @@ func NewPostgresStorage(host, port, user, password, dbname string) (*PostgresSto
 	psqlInfo := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		host, port, user, password, dbname)
 
+	log.Printf("Connecting to database with: host=%s port=%s user=%s dbname=%s",
+		host, port, user, dbname)
+
 	// Try to connect with retries
 	var db *sql.DB
 	var err error
 	for i := 0; i < 30; i++ {
+		log.Printf("Attempting database connection (attempt %d/30)...", i+1)
 		db, err = sql.Open("postgres", psqlInfo)
 		if err == nil {
+			log.Printf("Successfully opened database, attempting ping...")
 			err = db.Ping()
 			if err == nil {
+				log.Printf("Successfully pinged database")
 				break
 			}
+			log.Printf("Ping failed: %v", err)
+		} else {
+			log.Printf("Open failed: %v", err)
 		}
 		log.Printf("Failed to connect to database, retrying in 2 seconds... (attempt %d/30)", i+1)
 		time.Sleep(2 * time.Second)
@@ -58,27 +67,7 @@ func NewPostgresStorage(host, port, user, password, dbname string) (*PostgresSto
 		return nil, fmt.Errorf("failed to connect to database after 30 attempts: %v", err)
 	}
 
-	storage := &PostgresStorage{db: db}
-	if err := storage.initDB(); err != nil {
-		return nil, err
-	}
-
-	return storage, nil
-}
-
-func (s *PostgresStorage) initDB() error {
-	// Create contracts table if it doesn't exist
-	_, err := s.db.Exec(`
-		CREATE TABLE IF NOT EXISTS contracts (
-			id TEXT PRIMARY KEY,
-			type TEXT NOT NULL,
-			parameters JSONB NOT NULL,
-			created_at BIGINT NOT NULL,
-			is_active BOOLEAN NOT NULL,
-			duration INTEGER NOT NULL
-		)
-	`)
-	return err
+	return &PostgresStorage{db: db}, nil
 }
 
 func (s *PostgresStorage) Clean() error {
@@ -130,7 +119,7 @@ func (s *PostgresStorage) GetAll() ([]*Contract, error) {
 		FROM contracts
 	`)
 	if err != nil {
-		return nil, err
+		return make([]*Contract, 0), nil // Return empty slice instead of nil
 	}
 	defer rows.Close()
 
@@ -140,16 +129,40 @@ func (s *PostgresStorage) GetAll() ([]*Contract, error) {
 		var parameters []byte
 		err := rows.Scan(&contract.ID, &contract.Type, &parameters, &contract.CreatedAt, &contract.IsActive, &contract.Duration)
 		if err != nil {
-			return nil, err
+			return make([]*Contract, 0), nil // Return empty slice instead of nil
 		}
 		contract.Parameters = json.RawMessage(parameters)
 		contracts = append(contracts, &contract)
+	}
+	if contracts == nil {
+		return make([]*Contract, 0), nil // Return empty slice instead of nil
 	}
 	return contracts, nil
 }
 
 type server struct {
 	storage Storage
+}
+
+func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Try to ping the database
+	if s.storage != nil {
+		if db, ok := s.storage.(*PostgresStorage); ok {
+			if err := db.db.Ping(); err != nil {
+				log.Printf("Health check failed: %v", err)
+				http.Error(w, fmt.Sprintf("Database not healthy: %v", err), http.StatusServiceUnavailable)
+				return
+			}
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
 }
 
 func (s *server) handleSaveContract(w http.ResponseWriter, r *http.Request) {
@@ -185,7 +198,15 @@ func (s *server) handleGetContract(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		json.NewEncoder(w).Encode(contracts)
+		w.Header().Set("Content-Type", "application/json")
+		if contracts == nil {
+			contracts = make([]*Contract, 0) // Return empty slice instead of nil
+		}
+		if err := json.NewEncoder(w).Encode(contracts); err != nil {
+			log.Printf("Error encoding response: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		return
 	}
 
@@ -199,7 +220,12 @@ func (s *server) handleGetContract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	json.NewEncoder(w).Encode(contract)
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(contract); err != nil {
+		log.Printf("Error encoding response: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 func (s *server) handleDeleteContract(w http.ResponseWriter, r *http.Request) {
@@ -237,6 +263,8 @@ func (s *server) handleCleanDB(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	log.Printf("Starting storage service...")
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8001"
@@ -248,6 +276,9 @@ func main() {
 	dbPassword := os.Getenv("DB_PASSWORD")
 	dbName := os.Getenv("DB_NAME")
 
+	log.Printf("Database configuration: host=%s port=%s user=%s dbname=%s",
+		dbHost, dbPort, dbUser, dbName)
+
 	storage, err := NewPostgresStorage(dbHost, dbPort, dbUser, dbPassword, dbName)
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
@@ -255,6 +286,7 @@ func main() {
 
 	srv := &server{storage: storage}
 
+	http.HandleFunc("/health", srv.handleHealth)
 	http.HandleFunc("/contract", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
@@ -267,10 +299,9 @@ func main() {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
-
 	http.HandleFunc("/clean", srv.handleCleanDB)
 
-	log.Printf("Storage service starting on port %s", port)
+	log.Printf("Storage service HTTP server starting on port %s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal(err)
 	}

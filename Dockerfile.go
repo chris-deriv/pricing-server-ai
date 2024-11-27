@@ -26,8 +26,11 @@ COPY --from=builder /pricingserver /pricingserver
 # Add ca-certificates for HTTPS requests
 RUN apk --no-cache add ca-certificates
 
+# Default port (can be overridden by environment variable)
+ENV WEBSOCKET_SERVER_PORT=8080
+
 # Expose the port
-EXPOSE 8080
+EXPOSE ${WEBSOCKET_SERVER_PORT}
 
 # Run the binary
 CMD ["/pricingserver"]

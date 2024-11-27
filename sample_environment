@@ -1,0 +1,28 @@
+# PostgreSQL Configuration
+DB_HOST=db
+DB_PORT=5432
+DB_USER=pricingserver
+DB_PASSWORD=development_password
+DB_NAME=pricingserver_db
+
+# Service Ports
+WEBSOCKET_SERVER_PORT=8080
+CONTRACTS_SERVICE_PORT=8000
+STORAGE_SERVICE_PORT=8001
+
+# Simulation Engine Configuration
+SIMULATION_TICK_INTERVAL_MS=100
+SIMULATION_BASE_PRICE=100.0
+
+# Contract Service Configuration
+CONTRACT_MAX_DURATION_MS=3600000  # 1 hour
+CONTRACT_MIN_DURATION_MS=1000     # 1 second
+
+# Logging
+LOG_LEVEL=debug
+
+# Note: This is a sample configuration file.
+# 1. Copy this file to '.env'
+# 2. Replace the values with your actual configuration
+# 3. Never commit the actual .env file to version control
+# 4. In production, use secure passwords instead of development_password

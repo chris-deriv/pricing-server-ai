@@ -5,11 +5,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.go
-    environment:
-      - DEBUG=true
-      - CONTRACTS_SERVICE_URL=http://contracts-service:8000
+    env_file: .env
     ports:
-      - "8080:8080"
+      - "${WEBSOCKET_SERVER_PORT:-8080}:8080"
     volumes:
       - .:/app
     depends_on:
@@ -19,15 +17,14 @@ services:
     build:
       context: ./contracts_service
       dockerfile: Dockerfile
-    environment:
-      - DEBUG=true
-      - STORAGE_SERVICE_URL=http://storage-service:8001
+    env_file: .env
     ports:
-      - "8000:8000"
+      - "${CONTRACTS_SERVICE_PORT:-8000}:8000"
     volumes:
       - ./contracts_service:/app
     depends_on:
-      - storage-service
+      storage-service:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -38,28 +35,36 @@ services:
     build:
       context: ./storage_service
       dockerfile: Dockerfile
-    environment:
-      - PORT=8001
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_USER=contracts
-      - DB_PASSWORD=contracts
-      - DB_NAME=contracts
+    env_file: .env
     ports:
-      - "8001:8001"
+      - "${STORAGE_SERVICE_PORT:-8001}:8001"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8001"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   db:
     image: postgres:15
     environment:
-      - POSTGRES_USER=contracts
-      - POSTGRES_PASSWORD=contracts
-      - POSTGRES_DB=contracts
+      - POSTGRES_USER=pricingserver
+      - POSTGRES_PASSWORD=development_password
+      - POSTGRES_DB=pricingserver_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pricingserver -d pricingserver_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 volumes:
   postgres_data:

@@ -12,6 +12,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8000
+# Default port (can be overridden by environment variable)
+ENV CONTRACTS_SERVICE_PORT=8000
 
-CMD ["python", "main.py"]
+EXPOSE ${CONTRACTS_SERVICE_PORT}
+
+# Use uvicorn with environment-based port
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${CONTRACTS_SERVICE_PORT}"]

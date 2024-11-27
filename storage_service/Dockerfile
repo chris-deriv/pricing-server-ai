@@ -2,11 +2,15 @@ FROM golang:1.20-alpine
 
 WORKDIR /app
 
-COPY go.mod .
-COPY main.go .
+# Install netcat and postgresql-client for health checks
+RUN apk add --no-cache netcat-openbsd postgresql-client
 
+COPY go.mod .
+
+# Download dependencies
 RUN go mod download
-RUN go mod tidy
+
+COPY main.go .
 
 RUN go build -o storage_service
 

@@ -1,9 +1,8 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 import logging
 import os
 import json
 import time
-from datetime import datetime
 import requests
 from products import Product
 from products.lucky_ladder import LuckyLadder
@@ -51,13 +50,23 @@ class StorageClient:
         logger.debug(f"Retrieved contract data: {json.dumps(data, indent=2)}")
         return data
 
-    def get_all_contracts(self) -> list:
+    def get_all_contracts(self) -> List[dict]:
         url = f"{self.base_url}/contract"
-        response = requests.get(url)
-        response.raise_for_status()
-        data = response.json()
-        logger.debug(f"Retrieved all contracts: {json.dumps(data, indent=2)}")
-        return data
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+            data = response.json()
+            if data is None:
+                logger.debug("No contracts found, returning empty list")
+                return []
+            logger.debug(f"Retrieved all contracts: {json.dumps(data, indent=2)}")
+            return data
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error getting contracts: {e}")
+            return []
+        except json.JSONDecodeError as e:
+            logger.error(f"Error decoding response: {e}")
+            return []
 
     def delete_contract(self, contract_id: str) -> None:
         url = f"{self.base_url}/contract"
@@ -136,6 +145,10 @@ class ContractManager:
         """Restore contracts from storage on startup"""
         try:
             stored_contracts = self.storage.get_all_contracts()
+            if not stored_contracts:
+                logger.info("No contracts to restore")
+                return
+
             for contract_data in stored_contracts:
                 contract_id = contract_data["id"]
                 parameters = contract_data["parameters"]
