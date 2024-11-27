@@ -1,274 +1,271 @@
 package server
 
 import (
-    "encoding/json"
-    "fmt"
-    "os"
-    "strconv"
-    "sync"
-    "time"
-    "github.com/gorilla/websocket"
-    // "pricingserver/internal/contracts"
-    "pricingserver/internal/products"
-    // "pricingserver/internal/simulation"
-    "pricingserver/internal/common/logging"
+	"encoding/json"
+	"os"
+	"pricingserver/internal/common/logging"
+	"pricingserver/internal/contracts"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/gorilla/websocket"
 )
 
-// Add this at package level
 var debugLogging bool
 
 func init() {
-    // Check for DEBUG environment variable, default to false
-    debugLog := os.Getenv("DEBUG")
-    if parsed, err := strconv.ParseBool(debugLog); err == nil {
-        debugLogging = parsed
-    }
+	debugLog := os.Getenv("DEBUG")
+	if parsed, err := strconv.ParseBool(debugLog); err == nil {
+		debugLogging = parsed
+	}
 }
 
 // Message types
 const (
-    MessageTypeContractSubmission = "ContractSubmission"
-    MessageTypeContractAccepted   = "ContractAccepted"
-    MessageTypeContractUpdate     = "ContractUpdate"
-    MessageTypeError              = "Error"
+	MessageTypeContractSubmission = "ContractSubmission"
+	MessageTypeContractAccepted   = "ContractAccepted"
+	MessageTypeContractUpdate     = "ContractUpdate"
+	MessageTypeError              = "Error"
 )
 
 // Message structure
 type Message struct {
-    Type string          `json:"type"`
-    Data json.RawMessage `json:"data"`
+	Type string          `json:"type"`
+	Data json.RawMessage `json:"data"`
 }
 
 // ContractData represents data required to create a contract
 type ContractData struct {
-    ProductType     string        `json:"productType"`
-    Rungs          []float64     `json:"rungs"`
-    TargetMovement float64       `json:"targetMovement"`
-    Duration       time.Duration `json:"duration"`
-    Payoff         float64       `json:"payoff"`
+	ProductType    string    `json:"productType"`
+	Rungs          []float64 `json:"rungs"`
+	TargetMovement float64   `json:"targetMovement"`
+	Duration       int64     `json:"duration"` // Changed to int64 to handle raw milliseconds
+	Payoff         float64   `json:"payoff"`
 }
 
 // Client represents a connected client
 type Client struct {
-    ID        string
-    Conn      *websocket.Conn
-    Send      chan []byte
-    Contracts map[string]string
-    Hub       *Hub
-    mu        sync.Mutex
+	ID        string
+	Conn      *websocket.Conn
+	Send      chan []byte
+	Contracts map[string]string
+	Hub       *Hub
+	mu        sync.Mutex
 }
 
 // NewClient creates a new client instance
 func NewClient(hub *Hub, conn *websocket.Conn) *Client {
-    return &Client{
-        ID:        GenerateUniqueID(),
-        Hub:       hub,
-        Conn:      conn,
-        Send:      make(chan []byte, 256),
-        Contracts: make(map[string]string),
-    }
+	return &Client{
+		ID:        GenerateUniqueID(),
+		Hub:       hub,
+		Conn:      conn,
+		Send:      make(chan []byte, 256),
+		Contracts: make(map[string]string),
+	}
+}
+
+// SendMessage implements MessageSender interface
+func (c *Client) SendMessage(message []byte) {
+	logging.DebugLog("Client SendMessage called with message: %s", string(message))
+	select {
+	case c.Send <- message:
+		logging.DebugLog("Message queued successfully")
+	default:
+		logging.DebugLog("Warning: Send channel full, message dropped")
+	}
 }
 
 // ReadPump handles incoming messages from the client
 func (c *Client) ReadPump() {
-    defer func() {
-        c.Hub.Unregister <- c
-        c.Conn.Close()
-    }()
-    for {
-        _, message, err := c.Conn.ReadMessage()
-        if err != nil {
-            logging.DebugLog("ReadPump error:", err)
-            break
-        }
-        c.handleMessage(message)
-    }
+	defer func() {
+		c.Hub.Unregister <- c
+		c.Conn.Close()
+	}()
+	for {
+		_, message, err := c.Conn.ReadMessage()
+		if err != nil {
+			logging.DebugLog("ReadPump error:", err)
+			break
+		}
+		c.handleMessage(message)
+	}
 }
 
 // handleMessage processes messages from the client
 func (c *Client) handleMessage(message []byte) {
-    var msg Message
-    err := json.Unmarshal(message, &msg)
-    if err != nil {
-        logging.DebugLog("Invalid message format:", err)
-        return
-    }
+	var msg Message
+	err := json.Unmarshal(message, &msg)
+	if err != nil {
+		logging.DebugLog("Invalid message format:", err)
+		return
+	}
 
-    switch msg.Type {
-    case MessageTypeContractSubmission:
-        c.handleContractSubmission(msg.Data)
-    default:
-        logging.DebugLog("Unknown message type:", msg.Type)
-    }
+	switch msg.Type {
+	case MessageTypeContractSubmission:
+		c.handleContractSubmission(msg.Data)
+	default:
+		logging.DebugLog("Unknown message type:", msg.Type)
+	}
 }
 
-// Add this new type for price updates
-type PriceUpdate struct {
-    ContractID string    `json:"contractID"`
-    Price      float64   `json:"price"`
-    Timestamp  time.Time `json:"timestamp"`
-}
-
-// Add this method to the Client struct to implement MessageSender
-func (c *Client) SendMessage(message []byte) {
-    select {
-    case c.Send <- message:
-        logging.DebugLog("Message queued successfully")
-    default:
-        logging.DebugLog("Warning: Send channel full, message dropped")
-    }
-}
-
-// Update the handleContractSubmission method to ensure Client is passed correctly
+// handleContractSubmission processes contract submission requests
 func (c *Client) handleContractSubmission(data json.RawMessage) {
-    c.mu.Lock()
-    defer c.mu.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-    var contractData ContractData
-    err := json.Unmarshal(data, &contractData)
-    if err != nil {
-        logging.DebugLog("Invalid contract data:", err)
-        return
-    }
+	var contractData ContractData
+	err := json.Unmarshal(data, &contractData)
+	if err != nil {
+		logging.DebugLog("Invalid contract data:", err)
+		return
+	}
 
-    contractID := GenerateUniqueID()
-    
-    // Create a closure to capture the contractID
-    updateCallback := func(price float64, timestamp time.Time) {
-        update := PriceUpdate{
-            ContractID: contractID,
-            Price:     price,
-            Timestamp: timestamp,
-        }
-        response := Message{
-            Type: MessageTypeContractUpdate,
-            Data: json.RawMessage(mustMarshal(update)),
-        }
-        
-        // Use select to prevent blocking
-        select {
-        case c.Send <- mustMarshal(response):
-            logging.DebugLog("Price update sent for contract %s: %f", contractID, price)
-        default:
-            logging.DebugLog("Warning: Channel full, dropped price update for contract %s", contractID)
-        }
-    }
+	contractID := GenerateUniqueID()
+	logging.DebugLog("Creating new contract with ID: %s", contractID)
 
-    // Initialize product with callback
-    product, err := c.initializeProduct(contractData, contractID, updateCallback)
-    if err != nil {
-        logging.DebugLog("Failed to initialize product: %v", err)
-        return
-    }
+	// Convert duration from milliseconds to seconds
+	durationSeconds := contractData.Duration / 1000
+	logging.DebugLog("Converting duration from %d ms to %d seconds", contractData.Duration, durationSeconds)
 
-    // Start the product and subscribe to updates
-    c.Hub.ContractManager.AddContract(contractID, product)
-    c.Hub.SimulationEngine.Subscribe(contractID, product)
-    product.Start()
-    
-    c.Contracts[contractID] = contractData.ProductType
+	// Create contract parameters for Python service
+	var contractParams contracts.ContractParams
+	parameters := map[string]interface{}{
+		"duration": durationSeconds,
+		"payoff":   contractData.Payoff,
+	}
 
-    // Send confirmation
-    response := map[string]interface{}{
-        "type":       MessageTypeContractAccepted,
-        "contractID": contractID,
-    }
-    c.sendMessage(response)
+	switch contractData.ProductType {
+	case "LuckyLadder":
+		contractParams = contracts.ContractParams{
+			ContractType: "lucky_ladder",
+			Parameters:   parameters,
+		}
+		contractParams.Parameters["rungs"] = contractData.Rungs
+	case "MomentumCatcher":
+		contractParams = contracts.ContractParams{
+			ContractType: "momentum_catcher",
+			Parameters:   parameters,
+		}
+		contractParams.Parameters["target_movement"] = contractData.TargetMovement
+	default:
+		logging.DebugLog("Unsupported product type:", contractData.ProductType)
+		return
+	}
+
+	// Create a proxy for the contract
+	proxy := contracts.NewContractProxy(contractID, nil, c.Hub.ContractService)
+
+	// Set up a callback to handle Python service responses
+	proxy.SetUpdateCallback(func(price float64, timestamp time.Time) {
+		logging.DebugLog("Price update callback triggered with price: %f", price)
+
+		// Get the current state from the proxy
+		state := proxy.GetState()
+		logging.DebugLog("Got state from proxy: %+v", state)
+
+		// Create contract update message
+		update := map[string]interface{}{
+			"type": "ContractUpdate",
+			"data": state,
+		}
+
+		// Marshal and send the update
+		if updateBytes, err := json.Marshal(update); err == nil {
+			logging.DebugLog("Sending contract update: %s", string(updateBytes))
+			select {
+			case c.Send <- updateBytes:
+				logging.DebugLog("Contract update queued successfully")
+			default:
+				logging.DebugLog("Warning: Send channel full, dropped contract update")
+			}
+		} else {
+			logging.DebugLog("Failed to marshal contract update: %v", err)
+		}
+
+		// If the contract is no longer active, unsubscribe from updates
+		if status, ok := state["status"].(string); ok && (status == "inactive" || status == "expired" || status == "target_hit") {
+			logging.DebugLog("Contract %s is no longer active (status: %s), unsubscribing", contractID, status)
+			c.Hub.SimulationEngine.Unsubscribe(contractID)
+			delete(c.Contracts, contractID)
+		}
+	})
+
+	// Forward to Python service and subscribe to updates
+	err = c.Hub.ContractService.AddContract(contractID, contractParams)
+	if err != nil {
+		logging.DebugLog("Failed to add contract to service: %v", err)
+		return
+	}
+
+	logging.DebugLog("Subscribing contract %s to simulation engine", contractID)
+	c.Hub.SimulationEngine.Subscribe(contractID, proxy)
+	proxy.Start()
+
+	c.Contracts[contractID] = contractData.ProductType
+
+	// Send confirmation
+	response := map[string]interface{}{
+		"type":       MessageTypeContractAccepted,
+		"contractID": contractID,
+	}
+	c.sendMessage(response)
 }
 
-// Helper method to initialize products
-func (c *Client) initializeProduct(contractData ContractData, contractID string, callback func(float64, time.Time)) (products.Product, error) {
-    params := map[string]interface{}{
-        "ClientID":   c.ID,
-        "ContractID": contractID,
-        "Duration":   contractData.Duration,
-        "Payoff":     contractData.Payoff,
-    }
-
-    var product products.Product
-    switch contractData.ProductType {
-    case "LuckyLadder":
-        ll := &products.LuckyLadder{}
-        params["Rungs"] = contractData.Rungs
-        err := ll.Init(params)
-        if err != nil {
-            logging.DebugLog("Failed to initialize LuckyLadder:", err)
-            return nil, err
-        }
-        ll.SetUpdateCallback(callback)
-        product = ll
-    case "MomentumCatcher":
-        mc := &products.MomentumCatcher{}
-        params["TargetMovement"] = contractData.TargetMovement
-        params["Client"] = c
-        err := mc.Init(params)
-        if err != nil {
-            logging.DebugLog("Failed to initialize MomentumCatcher:", err)
-            return nil, err
-        }
-        mc.SetUpdateCallback(callback)
-        product = mc
-    default:
-        logging.DebugLog("Unsupported product type:", contractData.ProductType)
-        return nil, fmt.Errorf("unsupported product type: %s", contractData.ProductType)
-    }
-
-    return product, nil
-}
-
-// Helper function to marshal JSON (add this)
+// Helper function to marshal JSON
 func mustMarshal(v interface{}) []byte {
-    data, err := json.Marshal(v)
-    if err != nil {
-        panic(err) // In production code, you might want to handle this differently
-    }
-    return data
+	data, err := json.Marshal(v)
+	if err != nil {
+		panic(err) // In production code, you might want to handle this differently
+	}
+	return data
 }
 
 // sendMessage sends a message to the client
 func (c *Client) sendMessage(data interface{}) {
-    message, err := json.Marshal(data)
-    if err != nil {
-        logging.DebugLog("Failed to marshal message:", err)
-        return
-    }
+	message, err := json.Marshal(data)
+	if err != nil {
+		logging.DebugLog("Failed to marshal message:", err)
+		return
+	}
 
-    // Use select for non-blocking send
-    select {
-    case c.Send <- message:
-        logging.DebugLog("Message queued successfully")
-    default:
-        logging.DebugLog("Warning: Send channel full, message dropped")
-    }
+	logging.DebugLog("Sending message: %s", string(message))
+	select {
+	case c.Send <- message:
+		logging.DebugLog("Message queued successfully")
+	default:
+		logging.DebugLog("Warning: Send channel full, message dropped")
+	}
 }
 
 // WritePump handles sending messages to the client
 func (c *Client) WritePump() {
-    ticker := time.NewTicker(time.Second * 54) // Ping timer
-    defer func() {
-        ticker.Stop()
-        c.Conn.Close()
-    }()
+	ticker := time.NewTicker(time.Second * 54) // Ping timer
+	defer func() {
+		ticker.Stop()
+		c.Conn.Close()
+	}()
 
-    for {
-        select {
-        case message, ok := <-c.Send:
-            if !ok {
-                c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
-                return
-            }
+	for {
+		select {
+		case message, ok := <-c.Send:
+			if !ok {
+				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
 
-            c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-            if err := c.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
-                logging.DebugLog("Error writing message: %v", err)
-                return
-            }
-            logging.DebugLog("Message sent successfully")
-        case <-ticker.C:
-            c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-            if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-                return
-            }
-        }
-    }
+			logging.DebugLog("WritePump sending message: %s", string(message))
+			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := c.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
+				logging.DebugLog("Error writing message: %v", err)
+				return
+			}
+			logging.DebugLog("Message sent successfully through websocket")
+		case <-ticker.C:
+			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
 }

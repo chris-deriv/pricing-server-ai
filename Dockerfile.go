@@ -23,6 +23,9 @@ WORKDIR /
 # Copy the binary from builder
 COPY --from=builder /pricingserver /pricingserver
 
+# Add ca-certificates for HTTPS requests
+RUN apk --no-cache add ca-certificates
+
 # Expose the port
 EXPOSE 8080
 

@@ -2,10 +2,31 @@ version: '3'
 
 services:
   pricing-server:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.go
     environment:
       - DEBUG=true
+      - CONTRACTS_SERVICE_URL=http://contracts-service:8000
     ports:
       - "8080:8080"
     volumes:
       - .:/app
+    depends_on:
+      - contracts-service
+
+  contracts-service:
+    build:
+      context: ./contracts_service
+      dockerfile: Dockerfile
+    environment:
+      - DEBUG=true
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./contracts_service:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
