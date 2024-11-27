@@ -21,12 +21,45 @@ services:
       dockerfile: Dockerfile
     environment:
       - DEBUG=true
+      - STORAGE_SERVICE_URL=http://storage-service:8001
     ports:
       - "8000:8000"
     volumes:
       - ./contracts_service:/app
+    depends_on:
+      - storage-service
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+
+  storage-service:
+    build:
+      context: ./storage_service
+      dockerfile: Dockerfile
+    environment:
+      - PORT=8001
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=contracts
+      - DB_PASSWORD=contracts
+      - DB_NAME=contracts
+    ports:
+      - "8001:8001"
+    depends_on:
+      - db
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=contracts
+      - POSTGRES_PASSWORD=contracts
+      - POSTGRES_DB=contracts
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres_data:

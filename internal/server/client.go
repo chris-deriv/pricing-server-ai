@@ -27,6 +27,7 @@ const (
 	MessageTypeContractSubmission = "ContractSubmission"
 	MessageTypeContractAccepted   = "ContractAccepted"
 	MessageTypeContractUpdate     = "ContractUpdate"
+	MessageTypeContractQuery      = "ContractQuery"
 	MessageTypeError              = "Error"
 )
 
@@ -38,8 +39,9 @@ const (
 
 // Message structure
 type Message struct {
-	Type string          `json:"type"`
-	Data json.RawMessage `json:"data,omitempty"`
+	Type       string          `json:"type"`
+	Data       json.RawMessage `json:"data,omitempty"`
+	ContractID string          `json:"contractID,omitempty"`
 }
 
 // ContractData represents data required to create a contract
@@ -118,6 +120,8 @@ func (c *Client) handleMessage(message []byte) {
 		return
 	}
 
+	logging.DebugLog("Received message type: %s", msg.Type)
+
 	switch msg.Type {
 	case MessageTypeContractSubmission:
 		if msg.Data == nil {
@@ -126,9 +130,48 @@ func (c *Client) handleMessage(message []byte) {
 			return
 		}
 		c.handleContractSubmission(msg.Data)
+	case MessageTypeContractQuery:
+		if msg.ContractID == "" {
+			logging.DebugLog("Missing contractID in contract query")
+			c.sendError(ErrorTypeValidation, "ContractID is required for contract query")
+			return
+		}
+		logging.DebugLog("Querying contract: %s", msg.ContractID)
+		c.handleContractQuery(msg.ContractID)
 	default:
 		logging.DebugLog("Unknown message type: %s", msg.Type)
 		c.sendError(ErrorTypeValidation, fmt.Sprintf("Unknown message type: %s", msg.Type))
+	}
+}
+
+// handleContractQuery processes contract query requests
+func (c *Client) handleContractQuery(contractID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	logging.DebugLog("Getting contract state for: %s", contractID)
+
+	// Get contract state from service
+	state, err := c.Hub.ContractService.GetContractState(contractID)
+	if err != nil {
+		logging.DebugLog("Failed to get contract state: %v", err)
+		c.sendError(ErrorTypeValidation, fmt.Sprintf("Failed to get contract state: %v", err))
+		return
+	}
+
+	// If contract exists, send its state
+	if state != nil {
+		logging.DebugLog("Got contract state: %+v", state)
+		update := map[string]interface{}{
+			"type":       MessageTypeContractUpdate,
+			"contractID": contractID,
+			"data":       state,
+		}
+		logging.DebugLog("Sending contract update: %+v", update)
+		c.sendMessage(update)
+	} else {
+		logging.DebugLog("Contract not found: %s", contractID)
+		c.sendError(ErrorTypeValidation, fmt.Sprintf("Contract not found: %s", contractID))
 	}
 }
 
@@ -232,8 +275,9 @@ func (c *Client) handleContractSubmission(data json.RawMessage) {
 		logging.DebugLog("Got state from proxy: %+v", state)
 
 		update := map[string]interface{}{
-			"type": "ContractUpdate",
-			"data": state,
+			"type":       MessageTypeContractUpdate,
+			"contractID": contractID,
+			"data":       state,
 		}
 
 		if updateBytes, err := json.Marshal(update); err == nil {

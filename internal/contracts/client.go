@@ -153,3 +153,71 @@ func (c *ContractServiceClient) GetProduct(contractID string) (bool, error) {
 
 	return resp.StatusCode == http.StatusOK, nil
 }
+
+// GetContractState retrieves the current state of a contract from the Python service
+func (c *ContractServiceClient) GetContractState(contractID string) (map[string]interface{}, error) {
+	logging.DebugLog("Getting state for contract %s from Python service", contractID)
+	resp, err := c.client.Get(fmt.Sprintf("%s/contracts/%s/state", c.baseURL, contractID))
+	if err != nil {
+		logging.DebugLog("Failed to get contract state: %v", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logging.DebugLog("Failed to read response body: %v", err)
+		return nil, fmt.Errorf("failed to read response body: %v", err)
+	}
+	logging.DebugLog("Received contract state response: %s", string(body))
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("contract service returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var state map[string]interface{}
+	if err := json.Unmarshal(body, &state); err != nil {
+		logging.DebugLog("Failed to decode response: %v", err)
+		return nil, fmt.Errorf("failed to decode response: %v", err)
+	}
+
+	logging.DebugLog("Decoded contract state: %+v", state)
+	return state, nil
+}
+
+// GetActiveContracts retrieves a list of active contract IDs from the Python service
+func (c *ContractServiceClient) GetActiveContracts() ([]string, error) {
+	logging.DebugLog("Getting active contracts from Python service")
+	resp, err := c.client.Get(fmt.Sprintf("%s/contracts/active", c.baseURL))
+	if err != nil {
+		logging.DebugLog("Failed to get active contracts: %v", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logging.DebugLog("Failed to read response body: %v", err)
+		return nil, fmt.Errorf("failed to read response body: %v", err)
+	}
+	logging.DebugLog("Received active contracts response: %s", string(body))
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("contract service returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var response struct {
+		Contracts []string `json:"contracts"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		logging.DebugLog("Failed to decode response: %v", err)
+		return nil, fmt.Errorf("failed to decode response: %v", err)
+	}
+
+	logging.DebugLog("Found %d active contracts", len(response.Contracts))
+	return response.Contracts, nil
+}

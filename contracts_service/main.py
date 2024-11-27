@@ -17,6 +17,16 @@ app = FastAPI()
 # Global manager
 contract_manager = ContractManager()
 
+@app.get("/contracts/active")
+async def get_active_contracts():
+    """Get a list of active contract IDs"""
+    active_contracts = []
+    for contract_id, product in contract_manager.contracts.items():
+        if product.is_active:
+            active_contracts.append(contract_id)
+    logger.debug(f"Found {len(active_contracts)} active contracts")
+    return {"contracts": active_contracts}
+
 @app.post("/contracts")
 async def create_contract(request: Request):
     try:
@@ -119,7 +129,17 @@ async def update_price(contract_id: str, request: Request):
             timestamp = datetime.now()
             logger.debug(f"No timestamp in request, using current time: {timestamp}")
         
+        # Handle price update - this will update is_active if contract expires
         result = product.handle_price_update(price, timestamp)
+        
+        # If contract status changed to expired, save the state
+        if result.get("status") == "expired":
+            try:
+                contract_manager.storage.save_contract(contract_id, product)
+                logger.debug(f"Updated expired contract state in storage: {contract_id}")
+            except Exception as e:
+                logger.error(f"Error saving expired contract state: {e}")
+        
         result["contractID"] = contract_id
         result["timestamp"] = timestamp.isoformat()
         
@@ -151,6 +171,42 @@ async def get_last_update(contract_id: str):
     product.last_update["contractID"] = contract_id
     product.last_update["timestamp"] = datetime.now().isoformat()
     return product.last_update
+
+@app.get("/contracts/{contract_id}/state")
+async def get_contract_state(contract_id: str):
+    product = contract_manager.get_product(contract_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    
+    # Get elapsed time
+    elapsed_ms = product.get_elapsed_ms()
+    
+    # Build state response
+    state = {
+        "status": "active" if product.is_active else "inactive",
+        "elapsed_ms": elapsed_ms,
+        "duration": product.duration,
+        "price": product.current_price,
+        "product_type": product.__class__.__name__  # Add product type to response
+    }
+    
+    # Add product-specific state
+    if isinstance(product, LuckyLadder):
+        state.update({
+            "rungs_hit": product.last_update.get("rungs_hit", []) if product.last_update else [],
+            "remaining_rungs": product.last_update.get("remaining_rungs", product.rungs) if product.last_update else product.rungs
+        })
+    elif isinstance(product, MomentumCatcher):
+        state.update({
+            "movement": product.last_update.get("movement", 0) if product.last_update else 0,
+            "target_movement": product.target_movement
+        })
+    
+    # If contract has expired, update status
+    if elapsed_ms >= product.duration:
+        state["status"] = "expired"
+    
+    return state
 
 @app.delete("/contracts/{contract_id}")
 async def remove_contract(contract_id: str):

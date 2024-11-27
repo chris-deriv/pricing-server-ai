@@ -1,4 +1,6 @@
 const WebSocket = require('ws');
+const { ensureServicesRunning } = require('./docker-helper');
+const axios = require('axios');
 
 describe('Contract WebSocket Tests', () => {
     let ws;
@@ -29,11 +31,21 @@ describe('Contract WebSocket Tests', () => {
         });
     };
 
+    beforeAll(async () => {
+        // Ensure services are running before all tests
+        await ensureServicesRunning();
+        // Clean database before starting tests
+        await axios.post('http://localhost:8001/clean');
+    }, 30000);
+
     beforeEach(async () => {
-        // Create a new WebSocket connection before each test
+        // Create a new WebSocket connection
         ws = new WebSocket(WS_URL);
-        await new Promise((resolve) => ws.once('open', resolve));
-    });
+        await new Promise((resolve, reject) => {
+            ws.once('open', resolve);
+            ws.once('error', reject);
+        });
+    }, 15000);
 
     afterEach(() => {
         // Close the WebSocket connection after each test

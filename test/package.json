@@ -4,18 +4,20 @@
   "description": "",
   "main": "ws.test.js",
   "scripts": {
-    "test": "jest --detectOpenHandles"
+    "test": "jest --detectOpenHandles --forceExit"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "axios": "^1.4.0",
     "ws": "^8.13.0"
   },
   "devDependencies": {
     "jest": "^29.6.0"
   },
   "jest": {
-    "testTimeout": 10000
+    "testTimeout": 30000,
+    "testEnvironment": "node"
   }
 }
