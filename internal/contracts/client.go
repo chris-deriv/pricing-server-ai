@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"pricingserver/internal/common/logging"
+	"time"
 )
 
 // ContractServiceClient handles communication with the Python contracts service
@@ -102,7 +103,8 @@ func (c *ContractServiceClient) RemoveContract(contractID string) error {
 // UpdatePrice forwards price updates to the Python service and returns the response
 func (c *ContractServiceClient) UpdatePrice(contractID string, price float64) ([]byte, error) {
 	body := map[string]interface{}{
-		"price": price,
+		"price":     price,
+		"timestamp": time.Now().Format(time.RFC3339),
 	}
 
 	jsonBody, err := json.Marshal(body)

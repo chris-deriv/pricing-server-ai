@@ -5,29 +5,36 @@ const ws = new WebSocket('ws://localhost:8080/ws');
 ws.on('open', () => {
     console.log('WebSocket connection opened');
 
+    const momentumDuration = 2000;  // 2 seconds
+    const ladderDuration = 5000;   // 60 seconds
+
+    console.log(`Creating MomentumCatcher with duration: ${momentumDuration}ms`);
     const momentumMsg = JSON.stringify({
         "type": "ContractSubmission",
         "data": {
             "productType": "MomentumCatcher",
             "targetMovement": 5.0,
-            "duration": 60000,
+            "duration": momentumDuration,
             "payoff": 100.0
         }
     });
 
+    console.log(`Creating LuckyLadder with duration: ${ladderDuration}ms`);
     const luckyLadderMsg = JSON.stringify({
         "type": "ContractSubmission",
         "data": {
             "productType": "LuckyLadder",
             "rungs": [105, 110, 115],
-            "duration": 6000,
+            "duration": ladderDuration,
             "payoff": 100
         }
     });
 
-    // Uncomment one of these to test different contract types
+    // Send both contracts with a slight delay to ensure they're processed separately
     ws.send(luckyLadderMsg);
-    //ws.send(momentumMsg);
+    setTimeout(() => {
+        ws.send(momentumMsg);
+    }, 100);
 });
 
 ws.on('message', (data) => {
@@ -41,23 +48,8 @@ ws.on('message', (data) => {
 
         case 'ContractUpdate':
             const update = message.data;
-            console.log(update);
-            // console.log('Contract Update:');
-            // console.log('- Contract ID:', update.contractID);
-            // console.log('- Status:', update.status);
-            // console.log('- Price:', update.price);
-            // console.log('- Timestamp:', update.timestamp);
-
-            // MomentumCatcher specific fields
-            // if (update.movement !== undefined) {
-            //     console.log('- Movement:', update.movement);
-            //     console.log('- Target Hit:', update.target_hit);
-            // }
-
-            // LuckyLadder specific fields
-            // if (update.rungs_hit) {
-            //     console.log('- Rungs Hit:', update.rungs_hit);
-            // }
+            // Add timestamp to see when updates are received
+            console.log(`${new Date().toISOString()} Contract Update:`, update);
             break;
 
         case 'Error':

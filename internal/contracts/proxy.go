@@ -13,6 +13,7 @@ type ContractProxy struct {
 	priceCallback func(price float64, timestamp time.Time)
 	lastResponse  map[string]interface{}
 	isActive      bool
+	startTime     time.Time
 }
 
 // NewContractProxy creates a new proxy for a contract
@@ -22,6 +23,7 @@ func NewContractProxy(contractID string, _ interface{}, client *ContractServiceC
 		contractID: contractID,
 		client:     client,
 		isActive:   true,
+		startTime:  time.Now(),
 	}
 }
 
@@ -48,6 +50,7 @@ func (cp *ContractProxy) Init(params map[string]interface{}) error {
 // Start starts the proxy (implements Product interface)
 func (cp *ContractProxy) Start() {
 	logging.DebugLog("Starting contract proxy for contract %s", cp.contractID)
+	cp.startTime = time.Now()
 	cp.isActive = true
 }
 
@@ -99,35 +102,24 @@ func (cp *ContractProxy) HandlePriceUpdate(price float64, timestamp time.Time) {
 	status, _ := pythonResp["status"].(string)
 	logging.DebugLog("Contract %s status: %s", cp.contractID, status)
 
+	// Create contract update message
+	update := map[string]interface{}{
+		"type": "ContractUpdate",
+		"data": pythonResp,
+	}
+
+	// Marshal and send the update
+	if updateBytes, err := json.Marshal(update); err == nil {
+		if cp.priceCallback != nil {
+			cp.priceCallback(price, timestamp)
+		}
+		cp.SendMessage(updateBytes)
+	}
+
+	// Handle status changes
 	switch status {
 	case "inactive", "expired", "target_hit":
 		cp.Stop()
-		// Create contract update message
-		update := map[string]interface{}{
-			"type": "ContractUpdate",
-			"data": pythonResp,
-		}
-		if updateBytes, err := json.Marshal(update); err == nil {
-			if cp.priceCallback != nil {
-				cp.priceCallback(price, timestamp)
-			}
-			cp.SendMessage(updateBytes)
-		}
-	case "active":
-		// Create contract update message
-		update := map[string]interface{}{
-			"type": "ContractUpdate",
-			"data": pythonResp,
-		}
-		if updateBytes, err := json.Marshal(update); err == nil {
-			if cp.priceCallback != nil {
-				cp.priceCallback(price, timestamp)
-			}
-			cp.SendMessage(updateBytes)
-		}
-	case "no_updates":
-		logging.DebugLog("Contract %s skipping no_updates status", cp.contractID)
-		return
 	}
 }
 

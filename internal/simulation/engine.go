@@ -48,7 +48,13 @@ func (se *SimulationEngine) Start() {
 					price := se.generatePrice()
 					timestamp := time.Now()
 					logging.DebugLog("Generated new price: %f at %v with %d subscribers", price, timestamp, subscriberCount)
-					se.notifySubscribers(price, timestamp)
+					// Notify each subscriber independently
+					for contractID, handler := range se.subscribers {
+						go func(id string, h PriceHandler, p float64, t time.Time) {
+							logging.DebugLog("Notifying contract %s of price update: %f at %v", id, p, t)
+							h.HandlePriceUpdate(p, t)
+						}(contractID, handler, price, timestamp)
+					}
 				}
 				se.mu.Unlock()
 			case <-se.stopChan:
@@ -73,11 +79,10 @@ func (se *SimulationEngine) Subscribe(contractID string, handler PriceHandler) {
 	se.subscribers[contractID] = handler
 	logging.DebugLog("Current number of subscribers: %d", len(se.subscribers))
 
-	// Generate and send initial price update
-	price := se.BasePrice
+	// Send initial price update immediately
 	timestamp := time.Now()
-	logging.DebugLog("Sending initial price update to contract %s: %f", contractID, price)
-	handler.HandlePriceUpdate(price, timestamp)
+	logging.DebugLog("Sending initial price update to contract %s: %f at %v", contractID, se.BasePrice, timestamp)
+	go handler.HandlePriceUpdate(se.BasePrice, timestamp)
 }
 
 // Unsubscribe removes a handler from receiving price updates
@@ -87,15 +92,6 @@ func (se *SimulationEngine) Unsubscribe(contractID string) {
 	logging.DebugLog("Removing subscription for contract %s", contractID)
 	delete(se.subscribers, contractID)
 	logging.DebugLog("Current number of subscribers: %d", len(se.subscribers))
-}
-
-// notifySubscribers sends price updates to all subscribers
-func (se *SimulationEngine) notifySubscribers(price float64, timestamp time.Time) {
-	logging.DebugLog("Notifying subscribers of price update: %f", price)
-	for contractID, handler := range se.subscribers {
-		logging.DebugLog("Notifying contract %s of price update", contractID)
-		handler.HandlePriceUpdate(price, timestamp)
-	}
 }
 
 // generatePrice generates a simulated price

@@ -40,7 +40,7 @@ type ContractData struct {
 	ProductType    string    `json:"productType"`
 	Rungs          []float64 `json:"rungs"`
 	TargetMovement float64   `json:"targetMovement"`
-	Duration       int64     `json:"duration"` // Changed to int64 to handle raw milliseconds
+	Duration       int64     `json:"duration"` // milliseconds
 	Payoff         float64   `json:"payoff"`
 }
 
@@ -123,15 +123,12 @@ func (c *Client) handleContractSubmission(data json.RawMessage) {
 
 	contractID := GenerateUniqueID()
 	logging.DebugLog("Creating new contract with ID: %s", contractID)
-
-	// Convert duration from milliseconds to seconds
-	durationSeconds := contractData.Duration / 1000
-	logging.DebugLog("Converting duration from %d ms to %d seconds", contractData.Duration, durationSeconds)
+	logging.DebugLog("Contract duration: %d ms", contractData.Duration)
 
 	// Create contract parameters for Python service
 	var contractParams contracts.ContractParams
 	parameters := map[string]interface{}{
-		"duration": durationSeconds,
+		"duration": contractData.Duration,
 		"payoff":   contractData.Payoff,
 	}
 
