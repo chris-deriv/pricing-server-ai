@@ -74,22 +74,40 @@ describe('Contract WebSocket Tests', () => {
             expect(update.data.status).toBe('active');
         });
 
-        test('should handle MomentumCatcher with extreme target movement', async () => {
-            const extremeContract = {
+        test('should reject MomentumCatcher with negative target movement', async () => {
+            const invalidContract = {
                 ...momentumContract,
                 data: {
                     ...momentumContract.data,
-                    targetMovement: 1000.0 // Extremely high target
+                    targetMovement: -5.0
                 }
             };
             
-            ws.send(JSON.stringify(extremeContract));
+            ws.send(JSON.stringify(invalidContract));
             const response = await getNextMessage();
             
-            // Even with extreme values, we expect the contract to be accepted
-            // as the server implements its own risk management
-            expect(response.type).toBe('ContractAccepted');
-            expect(response.contractID).toBeDefined();
+            expect(response.type).toBe('Error');
+            expect(response.errorType).toBe('ValidationError');
+            expect(response.message).toContain('targetMovement');
+            expect(response.message).toContain('must be positive');
+        });
+
+        test('should reject MomentumCatcher with zero target movement', async () => {
+            const invalidContract = {
+                ...momentumContract,
+                data: {
+                    ...momentumContract.data,
+                    targetMovement: 0
+                }
+            };
+            
+            ws.send(JSON.stringify(invalidContract));
+            const response = await getNextMessage();
+            
+            expect(response.type).toBe('Error');
+            expect(response.errorType).toBe('ValidationError');
+            expect(response.message).toContain('targetMovement');
+            expect(response.message).toContain('must be positive');
         });
     });
 
@@ -127,54 +145,54 @@ describe('Contract WebSocket Tests', () => {
             expect(Array.isArray(update.data.remaining_rungs)).toBe(true);
         });
 
-        test('should handle LuckyLadder with extreme rungs', async () => {
-            const extremeContract = {
+        test('should reject LuckyLadder with non-ascending rungs', async () => {
+            const invalidContract = {
                 ...ladderContract,
                 data: {
                     ...ladderContract.data,
-                    rungs: [1000, 2000, 3000] // Extremely high rungs
+                    rungs: [115, 110, 105] // Descending rungs
                 }
             };
             
-            ws.send(JSON.stringify(extremeContract));
+            ws.send(JSON.stringify(invalidContract));
             const response = await getNextMessage();
             
-            // Even with extreme values, we expect the contract to be accepted
-            // as the server implements its own risk management
-            expect(response.type).toBe('ContractAccepted');
-            expect(response.contractID).toBeDefined();
+            expect(response.type).toBe('Error');
+            expect(response.errorType).toBe('ValidationError');
+            expect(response.message).toContain('rungs');
+            expect(response.message).toContain('ascending order');
+        });
+
+        test('should reject LuckyLadder with duplicate rungs', async () => {
+            const invalidContract = {
+                ...ladderContract,
+                data: {
+                    ...ladderContract.data,
+                    rungs: [105, 105, 110] // Duplicate rung
+                }
+            };
+            
+            ws.send(JSON.stringify(invalidContract));
+            const response = await getNextMessage();
+            
+            expect(response.type).toBe('Error');
+            expect(response.errorType).toBe('ValidationError');
+            expect(response.message).toContain('rung values');
+            expect(response.message).toContain('not allowed');
         });
     });
 
     describe('Error Handling Tests', () => {
-        test('should handle malformed JSON', async () => {
-            // Send invalid JSON and expect the connection to remain open
-            // The server should be resilient to malformed messages
+        test('should handle malformed JSON with error response', async () => {
             ws.send('invalid json{');
-            
-            // Wait a moment to ensure the server has time to process
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            // The connection should still be open
-            expect(ws.readyState).toBe(WebSocket.OPEN);
-            
-            // Verify we can still send valid messages
-            ws.send(JSON.stringify({
-                type: "ContractSubmission",
-                data: {
-                    productType: "MomentumCatcher",
-                    targetMovement: 5.0,
-                    duration: 2000,
-                    payoff: 100.0
-                }
-            }));
-            
             const response = await getNextMessage();
-            expect(response.type).toBe('ContractAccepted');
-            expect(response.contractID).toBeDefined();
+            
+            expect(response.type).toBe('Error');
+            expect(response.errorType).toBe('ParseError');
+            expect(response.message).toContain('Invalid JSON format');
         });
 
-        test('should handle unknown product type', async () => {
+        test('should reject unknown product type', async () => {
             const invalidContract = {
                 type: "ContractSubmission",
                 data: {
@@ -185,19 +203,14 @@ describe('Contract WebSocket Tests', () => {
             };
             
             ws.send(JSON.stringify(invalidContract));
+            const response = await getNextMessage();
             
-            try {
-                const response = await getNextMessage(5000);
-                // The server accepts the contract but it won't be processed
-                expect(response.type).toBe('ContractAccepted');
-                expect(response.contractID).toBeDefined();
-            } catch (error) {
-                // If we get a timeout or connection close, that's also acceptable
-                expect(error.message).toMatch(/Message timeout|Connection closed/);
-            }
+            expect(response.type).toBe('Error');
+            expect(response.errorType).toBe('ValidationError');
+            expect(response.message).toContain('unsupported product type');
         });
 
-        test('should handle contract with missing fields', async () => {
+        test('should reject contract with missing required fields', async () => {
             const invalidContract = {
                 type: "ContractSubmission",
                 data: {
@@ -211,12 +224,13 @@ describe('Contract WebSocket Tests', () => {
             ws.send(JSON.stringify(invalidContract));
             const response = await getNextMessage();
             
-            // The server accepts incomplete contracts but they won't be processed
-            expect(response.type).toBe('ContractAccepted');
-            expect(response.contractID).toBeDefined();
+            expect(response.type).toBe('Error');
+            expect(response.errorType).toBe('ValidationError');
+            expect(response.message).toContain('targetMovement');
+            expect(response.message).toContain('must be positive');
         });
 
-        test('should handle contract with invalid duration', async () => {
+        test('should reject contract with invalid duration', async () => {
             const invalidContract = {
                 type: "ContractSubmission",
                 data: {
@@ -230,9 +244,65 @@ describe('Contract WebSocket Tests', () => {
             ws.send(JSON.stringify(invalidContract));
             const response = await getNextMessage();
             
-            // The server accepts contracts with invalid durations but they won't be processed
-            expect(response.type).toBe('ContractAccepted');
-            expect(response.contractID).toBeDefined();
+            expect(response.type).toBe('Error');
+            expect(response.errorType).toBe('ValidationError');
+            expect(response.message).toContain('duration');
+            expect(response.message).toContain('must be positive');
+        });
+
+        test('should reject contract with invalid payoff', async () => {
+            const invalidContract = {
+                type: "ContractSubmission",
+                data: {
+                    productType: "MomentumCatcher",
+                    targetMovement: 5.0,
+                    duration: 2000,
+                    payoff: -100.0 // Negative payoff
+                }
+            };
+            
+            ws.send(JSON.stringify(invalidContract));
+            const response = await getNextMessage();
+            
+            expect(response.type).toBe('Error');
+            expect(response.errorType).toBe('ValidationError');
+            expect(response.message).toContain('payoff');
+            expect(response.message).toContain('must be positive');
+        });
+
+        test('should reject contract with missing type field', async () => {
+            const invalidContract = {
+                // Missing type field
+                data: {
+                    productType: "MomentumCatcher",
+                    targetMovement: 5.0,
+                    duration: 2000,
+                    payoff: 100.0
+                }
+            };
+            
+            ws.send(JSON.stringify(invalidContract));
+            const response = await getNextMessage();
+            
+            expect(response.type).toBe('Error');
+            expect(response.errorType).toBe('ValidationError');
+            expect(response.message).toContain('type');
+            expect(response.message).toContain('required');
+        });
+
+        test('should reject contract with missing data field', async () => {
+            const invalidContract = {
+                type: "ContractSubmission"
+                // Missing data field
+            };
+            
+            ws.send(JSON.stringify(invalidContract));
+            const response = await getNextMessage();
+            
+            expect(response.type).toBe('Error');
+            expect(response.errorType).toBe('ValidationError');
+            expect(response.message).toContain('Data field');
+            expect(response.message).toContain('required');
         });
     });
 });
