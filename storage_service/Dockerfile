@@ -5,12 +5,11 @@ WORKDIR /app
 # Install netcat and postgresql-client for health checks
 RUN apk add --no-cache netcat-openbsd postgresql-client
 
-COPY go.mod .
+# Copy Go module files and source code
+COPY go.mod go.sum main.go ./
 
 # Download dependencies
 RUN go mod download
-
-COPY main.go .
 
 RUN go build -o storage_service
 
